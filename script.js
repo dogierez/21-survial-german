@@ -1,0 +1,208 @@
+const splash = document.getElementById('splash-screen'), instr = document.getElementById('instructions-screen'),
+      app = document.getElementById('main-app'), grid = document.getElementById('stations-grid'),
+      playerZone = document.getElementById('player-zone'), audio = document.getElementById('audio-player'),
+      transcript = document.getElementById('transcript-box'), popup = document.getElementById('translation-popup'),
+      gameZone = document.getElementById('game-zone'), gameBoard = document.getElementById('game-board'),
+      feedbackArea = document.getElementById('quiz-feedback-area'), ptsVal = document.getElementById('points-val');
+
+// Updated Local Storage keys to keep this app's score separate
+let lifetimeScore = parseInt(localStorage.getItem('survivalScoreDE')) || 0;
+let completedLessons = JSON.parse(localStorage.getItem('completedSurvivalLessonsDE')) || [];
+if(ptsVal) ptsVal.innerText = lifetimeScore;
+
+let wordBucket = []; let currentQ = 0; let attempts = 0; let totalScore = 0; let firstCard = null;
+
+const stations = [
+    {file:"01_Aschewolke.mp3", title:"1. Die Aschewolke"},
+    {file:"02_Riesenwelle.mp3", title:"2. Die Riesenwelle"},
+    {file:"03_TiefeDunkelheit.mp3", title:"3. Die tiefe Dunkelheit"},
+    {file:"04_Treiben.mp3", title:"4. Das Treiben"},
+    {file:"05_ZerstoerteStadt.mp3", title:"5. Die zerstörte Stadt"},
+    {file:"06_GefroreneInsel.mp3", title:"6. Die gefrorene Insel"},
+    {file:"07_GrosseBaer.mp3", title:"7. Der große Bär"},
+    {file:"08_Hochwasser.mp3", title:"8. Das Hochwasser"},
+    {file:"09_Eistasche.mp3", title:"9. Die Eistasche"},
+    {file:"10_DieLetzte.mp3", title:"10. Die Letzte"},
+    {file:"11_EinsameInsel.mp3", title:"11. Die einsame Insel"},
+    {file:"12_RoteStaub.mp3", title:"12. Der rote Staub"},
+    {file:"13_SteigendeWasser.mp3", title:"13. Das steigende Wasser"},
+    {file:"14_WegDesFlusses.mp3", title:"14. Der Weg des Flusses"},
+    {file:"15_SafariGuide.mp3", title:"15. Der Safari-Guide"},
+    {file:"16_SandsturmLaeufer.mp3", title:"16. Der Sandsturm-Läufer"},
+    {file:"17_Schneefalle.mp3", title:"17. Die Schneefalle"},
+    {file:"18_Steingriff.mp3", title:"18. Der Steingriff"},
+    {file:"19_DieLeere.mp3", title:"19. Die Leere"},
+    {file:"20_Feuerwand.mp3", title:"20. Die Feuerwand"},
+    {file:"21_WeisseSchweigen.mp3", title:"21. Das weiße Schweigen"}
+];
+
+function renderGrid() {
+    grid.innerHTML = "";
+    stations.forEach((s, i) => {
+        const btn = document.createElement('div'); btn.className = 'station-tile';
+        if(completedLessons.includes(s.file)) btn.classList.add('completed');
+        btn.innerHTML = `<b>${i + 1}</b> ${s.title.replace(/^\d+\.\s*/, "")}`;
+        btn.onclick = () => { 
+            grid.classList.add('hidden'); playerZone.classList.remove('hidden'); 
+            document.getElementById('now-playing-title').innerText = s.title; 
+            audio.src = s.file; wordBucket = []; 
+        };
+        grid.appendChild(btn);
+    });
+}
+renderGrid();
+
+document.getElementById('btn-back').onclick = () => {
+    audio.pause(); audio.currentTime = 0;
+    playerZone.classList.add('hidden');
+    transcript.classList.add('hidden');
+    gameZone.classList.add('hidden');
+    grid.classList.remove('hidden');
+    currentQ = 0; attempts = 0;
+};
+
+document.getElementById('btn-start').onclick = () => { splash.classList.add('hidden'); instr.classList.remove('hidden'); };
+document.getElementById('btn-enter').onclick = () => { instr.classList.add('hidden'); app.classList.remove('hidden'); };
+
+document.getElementById('ctrl-play').onclick = () => audio.play();
+document.getElementById('ctrl-pause').onclick = () => audio.pause();
+document.getElementById('ctrl-stop').onclick = () => { audio.pause(); audio.currentTime = 0; };
+document.getElementById('btn-blind').onclick = () => { transcript.classList.add('hidden'); gameZone.classList.add('hidden'); audio.play(); };
+
+document.getElementById('btn-read').onclick = () => {
+    if (typeof lessonData === 'undefined') { alert("🚨 Fehler: data.js fehlgeschlagen!"); return; }
+    let fn = decodeURIComponent(audio.src.split('/').pop()); 
+    const data = lessonData[fn][0];
+    transcript.classList.remove('hidden'); gameZone.classList.add('hidden'); transcript.innerHTML = "";
+    data.text.split(" ").forEach(w => {
+        const span = document.createElement('span'); 
+        // Updated Regex to include German characters (äöüß)
+        const clean = w.toLowerCase().replace(/[^a-z0-9äöüßğüşöçı-]/gi, "");
+        span.innerText = w + " "; span.className = "clickable-word";
+        span.onclick = (e) => {
+            const tr = data.dict[clean];
+            if(tr) {
+                // Tracking DE instead of EN
+                if (!wordBucket.some(p => p.de === clean)) wordBucket.push({de: clean, tr: tr});
+                popup.innerText = tr; popup.style.left = `${e.clientX}px`; popup.style.top = `${e.clientY - 50}px`;
+                popup.classList.remove('hidden'); setTimeout(() => popup.classList.add('hidden'), 2000);
+            }
+        };
+        transcript.appendChild(span);
+    });
+    audio.play();
+};
+
+document.getElementById('btn-game').onclick = () => {
+    let fn = decodeURIComponent(audio.src.split('/').pop()); 
+    const lesson = lessonData[fn][0];
+    transcript.classList.add('hidden'); gameZone.classList.remove('hidden'); feedbackArea.innerHTML = "";
+    gameBoard.innerHTML = ""; firstCard = null; gameBoard.style.display = "grid";
+    let set = [...wordBucket];
+    // Pulling DE variables
+    for (let k in lesson.dict) { if (set.length >= 8) break; if (!set.some(p => p.de === k)) set.push({de: k, tr: lesson.dict[k]}); }
+    let deck = [];
+    set.forEach(p => { deck.push({text: p.de, match: p.tr}); deck.push({text: p.tr, match: p.de}); });
+    deck.sort(() => Math.random() - 0.5);
+    deck.forEach(card => {
+        const div = document.createElement('div'); div.className = 'game-card'; div.innerText = card.text;
+        div.onclick = () => {
+            if (div.classList.contains('correct') || div.classList.contains('selected')) return;
+            if (firstCard) {
+                if (firstCard.innerText === card.match) {
+                    div.classList.add('correct'); firstCard.classList.add('correct'); firstCard = null;
+                } else {
+                    div.classList.add('wrong'); setTimeout(() => { div.classList.remove('wrong'); firstCard.classList.remove('selected'); firstCard = null; }, 500);
+                }
+            } else { firstCard = div; div.classList.add('selected'); }
+        };
+        gameBoard.appendChild(div);
+    });
+};
+
+document.getElementById('btn-bowling').onclick = () => {
+    let fn = decodeURIComponent(audio.src.split('/').pop()); 
+    const lesson = lessonData[fn][0];
+    transcript.classList.add('hidden'); gameZone.classList.remove('hidden'); gameBoard.style.display = "none";
+    currentQ = 0; totalScore = 0; attempts = 0;
+    runQuiz(lesson);
+};
+
+function runQuiz(lesson) {
+    if (currentQ >= 7) { finishQuiz(); return; }
+    const qData = lesson.questions[currentQ];
+    feedbackArea.innerHTML = `
+        <div id="quiz-container">
+            <div class="score-badge">SCORE: ${totalScore} | Q: ${currentQ+1}/7</div>
+            <button id="btn-hear-q" class="mode-btn neon-green">👂 LISTEN TO QUESTION</button>
+            <div id="mic-box" class="hidden" style="margin-top:20px;">
+                <button id="btn-speak" class="mic-btn">🎤</button>
+                <p id="mic-status" style="color:#666; font-weight:bold;">Ready...</p>
+            </div>
+            <div id="res-area"></div>
+        </div>`;
+    
+    document.getElementById('btn-hear-q').onclick = () => {
+        const utter = new SpeechSynthesisUtterance(qData.q);
+        // Changed reading voice to German
+        utter.lang = 'de-DE';
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+            let v = voices.find(v => v.lang.startsWith('de'));
+            utter.voice = v || voices[0];
+        }
+        utter.onend = () => { document.getElementById('mic-box').classList.remove('hidden'); };
+        window.speechSynthesis.speak(utter);
+    };
+    
+    document.getElementById('btn-speak').onclick = function() {
+        const btn = this; const status = document.getElementById('mic-status');
+        window.currentRec = new (window.webkitSpeechRecognition || window.SpeechRecognition)();
+        // Changed speech recognition to German
+        window.currentRec.lang = 'de-DE';
+        window.currentRec.onstart = () => { btn.classList.add('active'); status.innerText = "Listening..."; };
+        window.currentRec.onresult = (e) => {
+            document.getElementById('mic-box').classList.add('hidden'); 
+            // Updated Regex to allow German characters in the answer check
+            const res = e.results[0][0].transcript.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            const ans = qData.a_de.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            if (res === ans) {
+                let pts = (attempts === 0) ? 20 : 15; totalScore += pts;
+                showResult(true, pts === 20 ? "STRIKE! (+20)" : "SPARE! (+15)", qData, lesson);
+            } else {
+                attempts++;
+                if (attempts === 1) showResult(false, "MISS! TRY AGAIN", qData, lesson, true);
+                else showResult(false, "MISS! (0 pts)", qData, lesson, false);
+            }
+        };
+        window.currentRec.start();
+    };
+}
+
+function showResult(isCorrect, msg, qData, lesson, canRetry = false) {
+    const area = document.getElementById('res-area');
+    area.innerHTML = `<h1 style="color:${isCorrect?'#39ff14':'#f44'}; font-size: 50px;">${msg}</h1>`;
+    if (isCorrect || !canRetry) {
+        // Changed display to show DE instead of EN
+        area.innerHTML += `<p class="quiz-q-text">Q: ${qData.q}</p><p class="quiz-a-text">DE: ${qData.a_de}</p><p style="color:#888; font-size:30px; font-weight: bold;">TR: ${qData.a_tr}</p><button id="btn-nxt" class="action-btn-large">NEXT QUESTION ⮕</button>`;
+        document.getElementById('btn-nxt').onclick = () => { currentQ++; attempts = 0; runQuiz(lesson); };
+    } else {
+        area.innerHTML += `<button id="btn-retry" class="action-btn-large">RETRY FOR SPARE</button>`;
+        document.getElementById('btn-retry').onclick = () => { area.innerHTML = ""; document.getElementById('mic-box').classList.remove('hidden'); document.getElementById('btn-speak').classList.remove('active'); };
+    }
+}
+
+function finishQuiz() {
+    lifetimeScore += totalScore; localStorage.setItem('survivalScoreDE', lifetimeScore);
+    const fn = decodeURIComponent(audio.src.split('/').pop());
+    if(!completedLessons.includes(fn)) { 
+        completedLessons.push(fn); 
+        localStorage.setItem('completedSurvivalLessonsDE', JSON.stringify(completedLessons)); 
+    }
+    renderGrid(); 
+    feedbackArea.innerHTML = `<h1 style="color:#ccff00; font-size: 60px;">FINISHED!</h1><h2 style="font-size: 40px;">QUIZ SCORE: ${totalScore}</h2><button id="btn-done" class="action-btn-large">SAVE & RETURN</button>`;
+    document.getElementById('btn-done').onclick = () => {
+        playerZone.classList.add('hidden');
+        grid.classList.remove('hidden');
+    };
+}
