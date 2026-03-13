@@ -5,7 +5,6 @@ const splash = document.getElementById('splash-screen'), instr = document.getEle
       gameZone = document.getElementById('game-zone'), gameBoard = document.getElementById('game-board'),
       feedbackArea = document.getElementById('quiz-feedback-area'), ptsVal = document.getElementById('points-val');
 
-// Updated Local Storage keys to keep this app's score separate
 let lifetimeScore = parseInt(localStorage.getItem('survivalScoreDE')) || 0;
 let completedLessons = JSON.parse(localStorage.getItem('completedSurvivalLessonsDE')) || [];
 if(ptsVal) ptsVal.innerText = lifetimeScore;
@@ -76,13 +75,11 @@ document.getElementById('btn-read').onclick = () => {
     transcript.classList.remove('hidden'); gameZone.classList.add('hidden'); transcript.innerHTML = "";
     data.text.split(" ").forEach(w => {
         const span = document.createElement('span'); 
-        // Updated Regex to include German characters (äöüß)
         const clean = w.toLowerCase().replace(/[^a-z0-9äöüßğüşöçı-]/gi, "");
         span.innerText = w + " "; span.className = "clickable-word";
         span.onclick = (e) => {
             const tr = data.dict[clean];
             if(tr) {
-                // Tracking DE instead of EN
                 if (!wordBucket.some(p => p.de === clean)) wordBucket.push({de: clean, tr: tr});
                 popup.innerText = tr; popup.style.left = `${e.clientX}px`; popup.style.top = `${e.clientY - 50}px`;
                 popup.classList.remove('hidden'); setTimeout(() => popup.classList.add('hidden'), 2000);
@@ -99,7 +96,6 @@ document.getElementById('btn-game').onclick = () => {
     transcript.classList.add('hidden'); gameZone.classList.remove('hidden'); feedbackArea.innerHTML = "";
     gameBoard.innerHTML = ""; firstCard = null; gameBoard.style.display = "grid";
     let set = [...wordBucket];
-    // Pulling DE variables
     for (let k in lesson.dict) { if (set.length >= 8) break; if (!set.some(p => p.de === k)) set.push({de: k, tr: lesson.dict[k]}); }
     let deck = [];
     set.forEach(p => { deck.push({text: p.de, match: p.tr}); deck.push({text: p.tr, match: p.de}); });
@@ -134,45 +130,65 @@ function runQuiz(lesson) {
     feedbackArea.innerHTML = `
         <div id="quiz-container">
             <div class="score-badge">SCORE: ${totalScore} | Q: ${currentQ+1}/7</div>
-            <button id="btn-hear-q" class="mode-btn neon-green">👂 LISTEN TO QUESTION</button>
-            <div id="mic-box" class="hidden" style="margin-top:20px;">
+            <button id="btn-hear-q" class="mode-btn neon-green">👂 FRAGE HÖREN</button>
+            
+            <div id="mic-box" style="margin-top:20px;">
                 <button id="btn-speak" class="mic-btn">🎤</button>
-                <p id="mic-status" style="color:#666; font-weight:bold;">Ready...</p>
+                <p id="mic-status" style="color:#666; font-weight:bold;">Bereit...</p>
             </div>
             <div id="res-area"></div>
         </div>`;
     
     document.getElementById('btn-hear-q').onclick = () => {
         const utter = new SpeechSynthesisUtterance(qData.q);
-        // Changed reading voice to German
+        window.currentUtter = utter; // Prevents iOS Safari garbage collection bug
         utter.lang = 'de-DE';
         const voices = window.speechSynthesis.getVoices();
         if (voices.length > 0) {
             let v = voices.find(v => v.lang.startsWith('de'));
             utter.voice = v || voices[0];
         }
-        utter.onend = () => { document.getElementById('mic-box').classList.remove('hidden'); };
         window.speechSynthesis.speak(utter);
     };
     
     document.getElementById('btn-speak').onclick = function() {
         const btn = this; const status = document.getElementById('mic-status');
-        window.currentRec = new (window.webkitSpeechRecognition || window.SpeechRecognition)();
-        // Changed speech recognition to German
+        const SpeechRec = window.webkitSpeechRecognition || window.SpeechRecognition;
+        
+        if (!SpeechRec) {
+            status.innerHTML = "⚠️ iOS blockiert das Mikrofon.<br>Bitte in <b>Safari</b> öffnen.";
+            status.style.color = "#ff4444";
+            return;
+        }
+        
+        window.currentRec = new SpeechRec();
         window.currentRec.lang = 'de-DE';
-        window.currentRec.onstart = () => { btn.classList.add('active'); status.innerText = "Listening..."; };
+        window.currentRec.onstart = () => { btn.classList.add('active'); status.innerText = "Hört zu..."; };
+        
+        window.currentRec.onerror = (e) => {
+            btn.classList.remove('active');
+            status.innerText = "Mikrofonfehler. Bitte erneut klicken.";
+            console.log("Speech Rec Error: ", e.error);
+        };
+        
+        window.currentRec.onend = () => { btn.classList.remove('active'); };
+        
         window.currentRec.onresult = (e) => {
             document.getElementById('mic-box').classList.add('hidden'); 
-            // Updated Regex to allow German characters in the answer check
-            const res = e.results[0][0].transcript.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
-            const ans = qData.a_de.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            
+            const rawTranscript = e.results[0][0].transcript;
+            const res = rawTranscript.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            
+            const rawAns = qData.a_de || qData.a_en || ""; 
+            const ans = rawAns.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            
             if (res === ans) {
                 let pts = (attempts === 0) ? 20 : 15; totalScore += pts;
                 showResult(true, pts === 20 ? "STRIKE! (+20)" : "SPARE! (+15)", qData, lesson);
             } else {
                 attempts++;
-                if (attempts === 1) showResult(false, "MISS! TRY AGAIN", qData, lesson, true);
-                else showResult(false, "MISS! (0 pts)", qData, lesson, false);
+                let failMsg = attempts === 1 ? `FALSCH! Gehört: "${rawTranscript}"` : `MISS! (0 pts)`;
+                showResult(false, failMsg, qData, lesson, attempts === 1);
             }
         };
         window.currentRec.start();
@@ -181,13 +197,13 @@ function runQuiz(lesson) {
 
 function showResult(isCorrect, msg, qData, lesson, canRetry = false) {
     const area = document.getElementById('res-area');
-    area.innerHTML = `<h1 style="color:${isCorrect?'#39ff14':'#f44'}; font-size: 50px;">${msg}</h1>`;
+    area.innerHTML = `<h1 style="color:${isCorrect?'#39ff14':'#f44'}; font-size: 40px;">${msg}</h1>`;
     if (isCorrect || !canRetry) {
-        // Changed display to show DE instead of EN
-        area.innerHTML += `<p class="quiz-q-text">Q: ${qData.q}</p><p class="quiz-a-text">DE: ${qData.a_de}</p><p style="color:#888; font-size:30px; font-weight: bold;">TR: ${qData.a_tr}</p><button id="btn-nxt" class="action-btn-large">NEXT QUESTION ⮕</button>`;
+        const ansText = qData.a_de || qData.a_en || "";
+        area.innerHTML += `<p class="quiz-q-text">Q: ${qData.q}</p><p class="quiz-a-text">DE: ${ansText}</p><p style="color:#888; font-size:30px; font-weight: bold;">TR: ${qData.a_tr}</p><button id="btn-nxt" class="action-btn-large">NÄCHSTE FRAGE ⮕</button>`;
         document.getElementById('btn-nxt').onclick = () => { currentQ++; attempts = 0; runQuiz(lesson); };
     } else {
-        area.innerHTML += `<button id="btn-retry" class="action-btn-large">RETRY FOR SPARE</button>`;
+        area.innerHTML += `<button id="btn-retry" class="action-btn-large">NOCHMAL VERSUCHEN</button>`;
         document.getElementById('btn-retry').onclick = () => { area.innerHTML = ""; document.getElementById('mic-box').classList.remove('hidden'); document.getElementById('btn-speak').classList.remove('active'); };
     }
 }
@@ -200,7 +216,7 @@ function finishQuiz() {
         localStorage.setItem('completedSurvivalLessonsDE', JSON.stringify(completedLessons)); 
     }
     renderGrid(); 
-    feedbackArea.innerHTML = `<h1 style="color:#ccff00; font-size: 60px;">FINISHED!</h1><h2 style="font-size: 40px;">QUIZ SCORE: ${totalScore}</h2><button id="btn-done" class="action-btn-large">SAVE & RETURN</button>`;
+    feedbackArea.innerHTML = `<h1 style="color:#ccff00; font-size: 60px;">FERTIG!</h1><h2 style="font-size: 40px;">PUNKTE: ${totalScore}</h2><button id="btn-done" class="action-btn-large">SPEICHERN & ZURÜCK</button>`;
     document.getElementById('btn-done').onclick = () => {
         playerZone.classList.add('hidden');
         grid.classList.remove('hidden');
