@@ -11,7 +11,6 @@ if(ptsVal) ptsVal.innerText = lifetimeScore;
 
 let wordBucket = []; let currentQ = 0; let attempts = 0; let totalScore = 0; let firstCard = null;
 
-// Force voices to load into the browser early
 let availableVoices = [];
 window.speechSynthesis.onvoiceschanged = () => {
     availableVoices = window.speechSynthesis.getVoices();
@@ -69,8 +68,6 @@ document.getElementById('btn-back').onclick = () => {
 document.getElementById('btn-start').onclick = () => { 
     splash.classList.add('hidden'); 
     instr.classList.remove('hidden'); 
-    
-    // Silent unlock for browser audio engines
     const unlockSpeech = new SpeechSynthesisUtterance('');
     window.speechSynthesis.speak(unlockSpeech);
 };
@@ -112,10 +109,26 @@ document.getElementById('btn-game').onclick = () => {
     let set = [...wordBucket];
     for (let k in lesson.dict) { if (set.length >= 8) break; if (!set.some(p => p.de === k)) set.push({de: k, tr: lesson.dict[k]}); }
     let deck = [];
-    set.forEach(p => { deck.push({text: p.de, match: p.tr}); deck.push({text: p.tr, match: p.de}); });
+    
+    set.forEach(p => { 
+        deck.push({text: p.de, match: p.tr, lang: "de"}); 
+        deck.push({text: p.tr, match: p.de, lang: "tr"}); 
+    });
+    
     deck.sort(() => Math.random() - 0.5);
     deck.forEach(card => {
-        const div = document.createElement('div'); div.className = 'game-card'; div.innerText = card.text;
+        const div = document.createElement('div'); 
+        div.className = 'game-card'; 
+        div.innerText = card.text;
+        
+        if (card.lang === "de") {
+            div.style.setProperty('color', '#ffaa00', 'important'); 
+            div.style.setProperty('text-shadow', '0 0 8px #ffaa0088', 'important');
+        } else {
+            div.style.setProperty('color', '#39ff14', 'important'); 
+            div.style.setProperty('text-shadow', '0 0 8px #39ff1488', 'important');
+        }
+        
         div.onclick = () => {
             if (div.classList.contains('correct') || div.classList.contains('selected')) return;
             if (firstCard) {
@@ -131,7 +144,7 @@ document.getElementById('btn-game').onclick = () => {
 };
 
 document.getElementById('btn-bowling').onclick = () => {
-    audio.pause(); // Ensure main story audio is paused before entering quiz
+    audio.pause(); 
     let fn = decodeURIComponent(audio.src.split('/').pop()); 
     const lesson = lessonData[fn][0];
     transcript.classList.add('hidden'); gameZone.classList.remove('hidden'); gameBoard.style.display = "none";
@@ -146,7 +159,6 @@ function runQuiz(lesson) {
         <div id="quiz-container">
             <div class="score-badge">SCORE: ${totalScore} | Q: ${currentQ+1}/7</div>
             <button id="btn-hear-q" class="mode-btn neon-green">👂 FRAGE HÖREN</button>
-            
             <div id="mic-box" style="margin-top:20px;">
                 <button id="btn-speak" class="mic-btn">🎤</button>
                 <p id="mic-status" style="color:#aaa; font-weight:bold;">Tippe auf das Mikrofon zum Sprechen</p>
@@ -155,18 +167,16 @@ function runQuiz(lesson) {
         </div>`;
     
     document.getElementById('btn-hear-q').onclick = () => {
-        audio.pause(); // Ensure the MP3 isn't drowning out the voice
-        window.speechSynthesis.cancel(); // Clear any hung speech engine
+        audio.pause(); 
+        window.speechSynthesis.cancel(); 
         
-        // Increased delay to 100ms to guarantee Chrome completely clears its throat
         setTimeout(() => {
             const utter = new SpeechSynthesisUtterance(qData.q);
-            window.currentUtter = utter; // Prevent Garbage Collection bug
+            window.currentUtter = utter; 
             utter.lang = 'de-DE';
             utter.volume = 1.0; 
-            utter.rate = 0.9; // Slightly slower for language learners
+            utter.rate = 0.9; 
             
-            // Safer voice finding logic
             let voices = window.speechSynthesis.getVoices();
             if (voices.length > 0) {
                 let deVoice = voices.find(v => v.lang.toLowerCase().includes('de'));
@@ -174,13 +184,6 @@ function runQuiz(lesson) {
                     utter.voice = deVoice;
                 }
             }
-            
-            // This will show us an alert if the browser physically cannot play the voice
-            utter.onerror = (e) => {
-                console.error("Speech Synthesis Error: ", e);
-                alert("Audio-Fehler: Dein Browser kann den Text nicht vorlesen.");
-            };
-            
             window.speechSynthesis.speak(utter);
         }, 100);
     };
@@ -190,7 +193,7 @@ function runQuiz(lesson) {
         const SpeechRec = window.webkitSpeechRecognition || window.SpeechRecognition;
         
         if (!SpeechRec) {
-            status.innerHTML = "⚠️ Safari/iOS erfordert Erlaubnis oder blockiert das Mikrofon.";
+            status.innerHTML = "⚠️ Browser blockiert das Mikrofon.";
             status.style.color = "#ff4444";
             return;
         }
@@ -210,7 +213,6 @@ function runQuiz(lesson) {
         window.currentRec.onresult = (e) => {
             const rawTranscript = e.results[0][0].transcript;
             const res = rawTranscript.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
-            
             const rawAns = qData.a_de || qData.a_en || ""; 
             const ans = rawAns.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
             
