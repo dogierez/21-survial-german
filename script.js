@@ -11,6 +11,12 @@ if(ptsVal) ptsVal.innerText = lifetimeScore;
 
 let wordBucket = []; let currentQ = 0; let attempts = 0; let totalScore = 0; let firstCard = null;
 
+// Force voices to load into the browser early
+let availableVoices = [];
+window.speechSynthesis.onvoiceschanged = () => {
+    availableVoices = window.speechSynthesis.getVoices();
+};
+
 const stations = [
     {file:"01_Aschewolke.mp3", title:"1. Die Aschewolke"},
     {file:"02_Riesenwelle.mp3", title:"2. Die Riesenwelle"},
@@ -60,7 +66,15 @@ document.getElementById('btn-back').onclick = () => {
     currentQ = 0; attempts = 0;
 };
 
-document.getElementById('btn-start').onclick = () => { splash.classList.add('hidden'); instr.classList.remove('hidden'); };
+document.getElementById('btn-start').onclick = () => { 
+    splash.classList.add('hidden'); 
+    instr.classList.remove('hidden'); 
+    
+    // Silent unlock for browser audio engines
+    const unlockSpeech = new SpeechSynthesisUtterance('');
+    window.speechSynthesis.speak(unlockSpeech);
+};
+
 document.getElementById('btn-enter').onclick = () => { instr.classList.add('hidden'); app.classList.remove('hidden'); };
 
 document.getElementById('ctrl-play').onclick = () => audio.play();
@@ -117,6 +131,7 @@ document.getElementById('btn-game').onclick = () => {
 };
 
 document.getElementById('btn-bowling').onclick = () => {
+    audio.pause(); // Ensure main story audio is paused before entering quiz
     let fn = decodeURIComponent(audio.src.split('/').pop()); 
     const lesson = lessonData[fn][0];
     transcript.classList.add('hidden'); gameZone.classList.remove('hidden'); gameBoard.style.display = "none";
@@ -134,21 +149,40 @@ function runQuiz(lesson) {
             
             <div id="mic-box" style="margin-top:20px;">
                 <button id="btn-speak" class="mic-btn">🎤</button>
-                <p id="mic-status" style="color:#666; font-weight:bold;">Bereit...</p>
+                <p id="mic-status" style="color:#aaa; font-weight:bold;">Tippe auf das Mikrofon zum Sprechen</p>
             </div>
             <div id="res-area"></div>
         </div>`;
     
     document.getElementById('btn-hear-q').onclick = () => {
-        const utter = new SpeechSynthesisUtterance(qData.q);
-        window.currentUtter = utter; // Prevents iOS Safari garbage collection bug
-        utter.lang = 'de-DE';
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-            let v = voices.find(v => v.lang.startsWith('de'));
-            utter.voice = v || voices[0];
-        }
-        window.speechSynthesis.speak(utter);
+        audio.pause(); // Ensure the MP3 isn't drowning out the voice
+        window.speechSynthesis.cancel(); // Clear any hung speech engine
+        
+        // Increased delay to 100ms to guarantee Chrome completely clears its throat
+        setTimeout(() => {
+            const utter = new SpeechSynthesisUtterance(qData.q);
+            window.currentUtter = utter; // Prevent Garbage Collection bug
+            utter.lang = 'de-DE';
+            utter.volume = 1.0; 
+            utter.rate = 0.9; // Slightly slower for language learners
+            
+            // Safer voice finding logic
+            let voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                let deVoice = voices.find(v => v.lang.toLowerCase().includes('de'));
+                if (deVoice) {
+                    utter.voice = deVoice;
+                }
+            }
+            
+            // This will show us an alert if the browser physically cannot play the voice
+            utter.onerror = (e) => {
+                console.error("Speech Synthesis Error: ", e);
+                alert("Audio-Fehler: Dein Browser kann den Text nicht vorlesen.");
+            };
+            
+            window.speechSynthesis.speak(utter);
+        }, 100);
     };
     
     document.getElementById('btn-speak').onclick = function() {
@@ -156,7 +190,7 @@ function runQuiz(lesson) {
         const SpeechRec = window.webkitSpeechRecognition || window.SpeechRecognition;
         
         if (!SpeechRec) {
-            status.innerHTML = "⚠️ iOS blockiert das Mikrofon.<br>Bitte in <b>Safari</b> öffnen.";
+            status.innerHTML = "⚠️ Safari/iOS erfordert Erlaubnis oder blockiert das Mikrofon.";
             status.style.color = "#ff4444";
             return;
         }
@@ -167,20 +201,20 @@ function runQuiz(lesson) {
         
         window.currentRec.onerror = (e) => {
             btn.classList.remove('active');
-            status.innerText = "Mikrofonfehler. Bitte erneut klicken.";
-            console.log("Speech Rec Error: ", e.error);
+            status.innerHTML = `Fehler: ${e.error}. Versuche es erneut.`;
+            status.style.color = "#ff4444";
         };
         
         window.currentRec.onend = () => { btn.classList.remove('active'); };
         
         window.currentRec.onresult = (e) => {
-            document.getElementById('mic-box').classList.add('hidden'); 
-            
             const rawTranscript = e.results[0][0].transcript;
             const res = rawTranscript.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
             
             const rawAns = qData.a_de || qData.a_en || ""; 
             const ans = rawAns.toLowerCase().trim().replace(/[^a-z0-9äöüß]/g, "");
+            
+            document.getElementById('mic-box').style.display = 'none';
             
             if (res === ans) {
                 let pts = (attempts === 0) ? 20 : 15; totalScore += pts;
@@ -204,7 +238,13 @@ function showResult(isCorrect, msg, qData, lesson, canRetry = false) {
         document.getElementById('btn-nxt').onclick = () => { currentQ++; attempts = 0; runQuiz(lesson); };
     } else {
         area.innerHTML += `<button id="btn-retry" class="action-btn-large">NOCHMAL VERSUCHEN</button>`;
-        document.getElementById('btn-retry').onclick = () => { area.innerHTML = ""; document.getElementById('mic-box').classList.remove('hidden'); document.getElementById('btn-speak').classList.remove('active'); };
+        document.getElementById('btn-retry').onclick = () => { 
+            area.innerHTML = ""; 
+            document.getElementById('mic-box').style.display = 'block'; 
+            document.getElementById('btn-speak').classList.remove('active'); 
+            document.getElementById('mic-status').innerText = "Tippe auf das Mikrofon zum Sprechen";
+            document.getElementById('mic-status').style.color = "#aaa";
+        };
     }
 }
 
